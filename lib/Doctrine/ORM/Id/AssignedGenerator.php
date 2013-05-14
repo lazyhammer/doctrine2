@@ -71,10 +71,10 @@ class AssignedGenerator extends AbstractIdGenerator
                     $uow->scheduleForIdentityResolution($entity, $value, $idField);
 
                     continue;
-                } else {
-                    // NOTE: Single Columns as associated identifiers only allowed - this constraint it is enforced.
-                    $value = current($uow->getEntityIdentifier($value));
                 }
+
+                // NOTE: Single Columns as associated identifiers only allowed - this constraint it is enforced.
+                $value = current($uow->getEntityIdentifier($value));
             }
 
             $identifier[$idField] = $value;
