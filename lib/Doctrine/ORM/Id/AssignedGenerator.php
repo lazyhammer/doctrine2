@@ -50,6 +50,7 @@ class AssignedGenerator extends AbstractIdGenerator
         $class      = $em->getClassMetadata(get_class($entity));
         $idFields   = $class->getIdentifierFieldNames();
         $identifier = array();
+        $uow        = $em->getUnitOfWork();
 
         foreach ($idFields as $idField) {
             $value = $class->getFieldValue($entity, $idField);
@@ -59,12 +60,21 @@ class AssignedGenerator extends AbstractIdGenerator
             }
 
             if (isset($class->associationMappings[$idField])) {
-                if ( ! $em->getUnitOfWork()->isInIdentityMap($value)) {
+                $isNew = false;
+
+                if (( ! $uow->isInIdentityMap($value) || $uow->isScheduledForDelete($value)) &&
+                    ! ($isNew = $uow->isScheduledForInsert($value))) {
                     throw ORMException::entityMissingForeignAssignedId($entity, $value);
                 }
 
-                // NOTE: Single Columns as associated identifiers only allowed - this constraint it is enforced.
-                $value = current($em->getUnitOfWork()->getEntityIdentifier($value));
+                if ($isNew) {
+                    $uow->scheduleForIdentityResolution($entity, $value, $idField);
+
+                    continue;
+                } else {
+                    // NOTE: Single Columns as associated identifiers only allowed - this constraint it is enforced.
+                    $value = current($uow->getEntityIdentifier($value));
+                }
             }
 
             $identifier[$idField] = $value;

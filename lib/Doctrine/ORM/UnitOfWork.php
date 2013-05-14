@@ -140,6 +140,18 @@ class UnitOfWork implements PropertyChangedListener
     private $scheduledForDirtyCheck = array();
 
     /**
+      * Map of entities that are scheduled for identity resolution.
+      * This is only used for entities with an ASSIGNED id generation strategy when
+      * the identity field is mapped to an entity with yet to be generated id.
+      * Keys are object ids (spl_object_hash).
+      *
+      * @var array
+      */
+     private $scheduledForIdentityResolution = array();
+
+     private $identityResolutionMap = array();
+
+     /**
      * A list of all pending entity insertions.
      *
      * @var array
@@ -388,6 +400,8 @@ class UnitOfWork implements PropertyChangedListener
         $this->collectionDeletions =
         $this->visitedCollections =
         $this->scheduledForDirtyCheck =
+        $this->scheduledForIdentityResolution =
+        $this->identityResolutionMap =
         $this->orphanRemovals = array();
     }
 
@@ -964,6 +978,28 @@ class UnitOfWork implements PropertyChangedListener
                 $this->originalEntityData[$oid][$idField] = $id;
 
                 $this->addToIdentityMap($entity);
+
+                if (isset($this->identityResolutionMap[$oid])) {
+                    foreach ($this->identityResolutionMap[$oid] as $assocOid => $idField) {
+                        if ( ! isset($this->scheduledForIdentityResolution[$assocOid])) {
+                            continue;
+                        }
+
+                        $assocEntity = $this->scheduledForIdentityResolution[$assocOid];
+                        $assocClass  = $this->em->getClassMetadata(get_class($assocEntity));
+                        $identifier  = &$this->entityIdentifiers[$assocOid];
+
+                        $identifier[$idField] = $id;
+
+                        if (count($identifier) === count($assocClass->identifier)) {
+                            unset($this->scheduledForIdentityResolution[$assocOid]);
+
+                            $this->addToIdentityMap($assocEntity);
+                        }
+                    }
+
+                    unset($this->identityResolutionMap[$oid]);
+                }
             }
         }
 
@@ -1153,7 +1189,7 @@ class UnitOfWork implements PropertyChangedListener
 
         $this->entityInsertions[$oid] = $entity;
 
-        if (isset($this->entityIdentifiers[$oid])) {
+        if (isset($this->entityIdentifiers[$oid]) && !isset($this->scheduledForIdentityResolution[$oid])) {
             $this->addToIdentityMap($entity);
         }
 
@@ -1985,6 +2021,10 @@ class UnitOfWork implements PropertyChangedListener
                 break;
             case self::STATE_NEW:
             case self::STATE_DETACHED:
+                unset(
+                    $this->scheduledForIdentityResolution[$oid],
+                    $this->identityResolutionMap[$oid]
+                );
                 return;
         }
 
@@ -2356,6 +2396,8 @@ class UnitOfWork implements PropertyChangedListener
             $this->extraUpdates =
             $this->readOnlyObjects =
             $this->visitedCollections =
+            $this->scheduledForIdentityResolution =
+            $this->identityResolutionMap =
             $this->orphanRemovals = array();
 
             if ($this->commitOrderCalculator !== null) {
@@ -2910,6 +2952,15 @@ class UnitOfWork implements PropertyChangedListener
         $rootClassName = $this->em->getClassMetadata(get_class($entity))->rootEntityName;
 
         $this->scheduledForDirtyCheck[$rootClassName][spl_object_hash($entity)] = $entity;
+    }
+
+    public function scheduleForIdentityResolution($entity, $assocEntity, $idField)
+    {
+        $oid      = spl_object_hash($entity);
+        $assocOid = spl_object_hash($assocEntity);
+
+        $this->scheduledForIdentityResolution[$oid] = $entity;
+        $this->identityResolutionMap[$assocOid][$oid] = $idField;
     }
 
     /**
